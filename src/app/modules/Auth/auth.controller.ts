@@ -4,204 +4,297 @@ import sendResponse from "../../utils/sendResponse";
 import { AuthServices } from "./auth.service";
 import config from "../../config";
 import AppError from "../../errors/AppError";
+import { AUTH_CONFIG } from "./auth.config";
+import { CookieOptions } from "express";
+import { deleteCachedData } from "../../utils/redis.utils";
 
+/**
+ * Handles user signup with proper validation and error handling
+ */
 const signupUser = catchAsync(async (req, res) => {
-  const { ...users } = req.body;
-  const newUser = await AuthServices.signupUser(users);
+  const { ...userData } = req.body;
+  const { newUser } = await AuthServices.signupUser(userData);
 
   sendResponse(res, {
-    statusCode: httpStatus.OK,
+    statusCode: httpStatus.CREATED,
     success: true,
-    message: "User Registered Successfully",
-    data: newUser,
+    message: "User registered successfully. Please check your email for verification code.",
+    data: {
+      user: {
+        name: newUser.name,
+        email: newUser.email,
+        role: newUser.role,
+        isVerified: newUser.isVerified,
+      },
+    },
   });
 });
+
+/**
+ * Verifies user email using the provided verification code
+ */
 const verifyEmail = catchAsync(async (req, res) => {
-  const { code } = req.body;
-  const result = await AuthServices.verifyEmail(code);
+  const { email, code } = req.body;
+
+  if (!email || !code) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email and verification code are required");
+  }
+
+  const { user } = await AuthServices.verifyEmail(email, code);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Email Verified Successfully!",
-    data: result,
+    message: "Email verified successfully!",
+    data: {
+      user: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+      },
+    },
   });
 });
 
+/**
+ * Resends verification code with rate limiting
+ */
 const resendVerifyEmailCode = catchAsync(async (req, res) => {
   const { email } = req.body;
-  // console.log('request: ',req.body)
-  const result = await AuthServices.resendVerifyEmailCode(email);
+
+  if (!email) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email is required");
+  }
+
+  await AuthServices.resendVerifyEmailCode(email);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Resend Email Verification code",
-    data: result,
+    message: "Verification code sent successfully. Please check your email.",
+    data: null,
   });
 });
 
+/**
+ * Handles user login with proper token management
+ */
 const loginUser = catchAsync(async (req, res) => {
-  const result = await AuthServices.loginUser(req.body);
-  const { accessToken, user, refreshToken } = result;
-      res.cookie("accessToken", accessToken, {
-      // secure: process.env.NODE_ENV === 'production',
-      secure: true,
-      httpOnly: true,
-      sameSite: "none", // Change from "strict" to "none" for cross-site requests
-      maxAge:  1000 * 60 * 60 * 24, // 1 day for testing
-      path: "/", // Explicitly set the path
-    });
+  const { user, accessToken, refreshToken } = await AuthServices.loginUser(req.body);
 
-    res.cookie("refreshToken", refreshToken, {
-      // secure: process.env.NODE_ENV === 'production', 
-      secure: true,
-      httpOnly: true,
-      sameSite: "none", // Change from "strict" to "none" for cross-site requests
-      maxAge: 1000 * 60 * 60 * 24 * 365, // 1 year for testing
-      path: "/", // Explicitly set the path
-    });
+  // Set secure cookie options
+  const cookieOptions: CookieOptions = {
+    secure: config.NODE_ENV === 'production',
+    httpOnly: true,
+    sameSite: config.NODE_ENV === 'production' ? 'strict' : 'lax',
+    path: '/',
+  };
 
-  
+  // Set access token cookie
+  res.cookie("accessToken", accessToken, {
+    ...cookieOptions,
+    maxAge: parseInt(config.redis_ttl_access_token as string) * 1000 || 3600000, // 1 hour
+  });
+
+  // Set refresh token cookie
+  res.cookie("refreshToken", refreshToken, {
+    ...cookieOptions,
+    maxAge: parseInt(config.redis_ttl_refresh_token as string) * 1000 || 604800000, // 7 days
+  });
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "User logged in successfully!",
     data: {
+      user: {
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        isVerified: user.isVerified,
+      },
       accessToken,
-      user,
     },
   });
 });
 
-
-const refreshTokenController = catchAsync(async(req, res) => {
-  // console.log("here is refresh token controller")
+/**
+ * Handles refresh token requests
+ */
+const refreshTokenController = catchAsync(async (req, res) => {
   const { refreshToken } = req.cookies;
-  // console.log(refreshToken)
+
   if (!refreshToken) {
-      throw new AppError(httpStatus.BAD_REQUEST, 'Refresh token is required');
+    throw new AppError(httpStatus.UNAUTHORIZED, 'Refresh token is required');
   }
-  const result = await AuthServices.refreshTokenService(res,refreshToken);
 
-  // console.log("result: ", result);
+  const { accessToken } = await AuthServices.refreshTokenService(res, refreshToken);
 
-  res.clearCookie("accessToken", { 
-    httpOnly: true, 
-    secure: true, // Set to true if using HTTPS
-    sameSite: "strict" // Or 'Lax' or 'None' depending on your setup
-  });
-  
-  res.cookie("accessToken", result.accessToken, {
-    secure: true,
+  // Set secure cookie options
+  const cookieOptions: CookieOptions = {
+    secure: config.NODE_ENV === 'production',
     httpOnly: true,
-    sameSite: "strict",
-    maxAge: 1000 * 60 * 60 * 24, // 1 day for testing
-  });
+    sameSite: config.NODE_ENV === 'production' ? 'strict' : 'lax',
+    path: '/',
+    maxAge: parseInt(config.redis_ttl_access_token as string) * 1000 || 3600000, // 1 hour
+  };
 
-  sendResponse(res, {
-      statusCode: httpStatus.OK,
-      success: true,
-      message: 'access token in successfully', 
-      data: result
-  });
-})
-
-const forgotPassword = catchAsync(async (req, res) => {
-  await AuthServices.forgotPassword(req.body);
+  // Update access token cookie
+  res.cookie("accessToken", accessToken, cookieOptions);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "Sent email successfully!",
+    message: 'Access token refreshed successfully',
+    data: { accessToken },
+  });
+});
+
+/**
+ * Handles password reset requests
+ */
+const forgotPassword = catchAsync(async (req, res) => {
+  const { email } = req.body;
+
+  if (!email) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email is required");
+  }
+
+  await AuthServices.forgotPassword(email);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Password reset instructions sent to your email",
     data: null,
   });
 });
 
+/**
+ * Handles password reset with token validation
+ */
 const resetPassword = catchAsync(async (req, res) => {
-  const { password } = req.body;
-  const { token } = req.params;
+  const { email, token, newPassword } = req.body;
 
-  if (!token) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Something went wrong !");
+  if (!email || !token || !newPassword) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email, token, and new password are required");
   }
 
-  const result = await AuthServices.resetPassword(password, token);
+  await AuthServices.resetPassword(email, token, newPassword);
 
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "password Update successfully!",
+    message: "Password reset successful. Please login with your new password.",
+    data: null,
+  });
+});
+
+/**
+ * Handles user logout
+ */
+const logout = catchAsync(async (req, res) => {
+  const { email } = req.user;
+
+  // Clear cookies
+  const cookieOptions: CookieOptions = {
+    httpOnly: true,
+    secure: config.NODE_ENV === 'production',
+    sameSite: config.NODE_ENV === 'production' ? 'strict' : 'lax',
+    path: '/',
+  };
+
+  res.clearCookie("accessToken", cookieOptions);
+  res.clearCookie("refreshToken", cookieOptions);
+
+  // Clear tokens from Redis
+  const prefix = config.redis_cache_key_prefix || 'auth';
+  await Promise.all([
+    deleteCachedData(`${prefix}:user:${email}:accessToken`),
+    deleteCachedData(`${prefix}:user:${email}:refreshToken`),
+  ]);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Logged out successfully",
+    data: null,
+  });
+});
+
+/**
+ * Gets paginated list of users with proper authorization
+ */
+const getUsers = catchAsync(async (req, res) => {
+  const filters = {
+    page: Number(req.query.page) || 1,
+    limit: Number(req.query.limit) || 10,
+    searchTerm: req.query.searchTerm as string || "",
+  };
+
+  const result = await AuthServices.getUsers(filters);
+
+  sendResponse(res, {
+    statusCode: httpStatus.OK,
+    success: true,
+    message: "Users retrieved successfully",
     data: result,
   });
 });
 
-const logout = catchAsync(async (req, res) => {
- // res.clearCookie("accessToken");
-  res.clearCookie("accessToken", { 
-    httpOnly: true, 
-    secure: true, // Set to true if using HTTPS
-    sameSite: "strict" // Or 'Lax' or 'None' depending on your setup
-  });
-
-  res.clearCookie("refreshToken", { 
-    httpOnly: true, 
-    secure: true, // Set to true if using HTTPS
-    sameSite: "strict" // Or 'Lax' or 'None' depending on your setup
-  });
-
-  res.clearCookie("isTokenValid", { 
-    httpOnly: false, 
-    secure: false, // Set to true if using HTTPS
-    sameSite: "none" // Or 'Lax' or 'None' depending on your setup
-  });
-
-  res.clearCookie("role", { 
-    httpOnly: false, 
-    secure: false, // Set to true if using HTTPS
-    sameSite: "none" // Or 'Lax' or 'None' depending on your setup
-  });
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "User logged out successfully",
-    data: [],
-  });
-});
-
-const getUsers = catchAsync(async (req, res) => {
-  const users = await AuthServices.getUsers(req.query);
-
-  sendResponse(res, {
-    statusCode: httpStatus.OK,
-    success: true,
-    message: "Getting all Users ",
-    data: users.data,
-    meta: users.meta,
-  });
-});
-
+/**
+ * Changes user role with proper authorization checks
+ */
 const changeRole = catchAsync(async (req, res) => {
-  const { email, role:newRole } = req.body;
-  const user = await AuthServices.changeRole(email, newRole, req.user);
-  console.log("user", user);
+  const { email, newRole } = req.body;
+  const currentUser = req.user;
+
+  if (!email || !newRole) {
+    throw new AppError(httpStatus.BAD_REQUEST, "Email and new role are required");
+  }
+
+  const updatedUser = await AuthServices.changeRole(email, newRole, currentUser);
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
-    message: "User role changed successfully",
-    data: user,
+    message: "User role updated successfully",
+    data: {
+      user: {
+        name: updatedUser.name,
+        email: updatedUser.email,
+        role: updatedUser.role,
+        isVerified: updatedUser.isVerified,
+      },
+    },
   });
 });
 
+/**
+ * Deletes user with proper authorization checks
+ */
 const deleteUser = catchAsync(async (req, res) => {
   const { id } = req.params;
-  const user = await AuthServices.deleteUser(id, req.user);
+  const currentUser = req.user;
+
+  if (!id) {
+    throw new AppError(httpStatus.BAD_REQUEST, "User ID is required");
+  }
+
+  const deletedUser = await AuthServices.deleteUser(id, currentUser);
+
   sendResponse(res, {
     statusCode: httpStatus.OK,
     success: true,
     message: "User deleted successfully",
-    data: user,
+    data: {
+      user: {
+        name: deletedUser.name,
+        email: deletedUser.email,
+        role: deletedUser.role,
+      },
+    },
   });
 });
 

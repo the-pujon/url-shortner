@@ -1,10 +1,19 @@
 import { sendEmail } from "./../../utils/sendEmail";
 import httpStatus from "http-status";
 import AppError from "../../errors/AppError";
-import { ILoginUser, IUser } from "./auth.interface";
+import { 
+  ILoginUser, 
+  IUser, 
+  IPaginationParams, 
+  IPaginatedResponse, 
+  UserRole, 
+  ITokenPayload,
+  IVerificationData,
+  IResetPasswordData
+} from "./auth.interface";
 import { User } from "./auth.model";
 import config from "../../config";
-import { createToken, removeTokens } from "./auth.utils";
+import { createToken, removeTokens, checkRateLimit, validatePassword, canModifyRole } from "./auth.utils";
 import bcrypt from "bcrypt";
 import crypto from "crypto";
 import {
@@ -14,231 +23,378 @@ import {
 } from "../../utils/redis.utils";
 import { JsonWebTokenError, JwtPayload, TokenExpiredError } from "jsonwebtoken";
 import jwt from "jsonwebtoken";
+import { AUTH_CONFIG } from "./auth.config";
 
-const signupUser = async (payload: IUser) => {
+// Constants for configuration
+const VERIFICATION_TOKEN_LENGTH = 6;
+const VERIFICATION_TOKEN_EXPIRY_MINUTES = 10;
+const CACHE_PREFIX = 'verification:';
+
+/**
+ * Generates a secure random verification code
+ */
+const generateVerificationCode = (): string => {
+  return crypto.randomBytes(3).toString('hex').toUpperCase().slice(0, 6);
+};
+
+/**
+ * Handles user signup process including verification code generation and email sending
+ */
+const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
   const { email } = payload;
-  // Check if user exists
-  const user = await User.isUserExistsByEmail(email);
 
-  if (user) {
-    throw new AppError(409, "User already exists");
-  }
-
-  // for verification by Email
-  // make random 6 digit of code
-  const verificationToken = Math.floor(
-    100000 + Math.random() * 900000
-  ).toString();
-  // Expire time in 1 hour
-  //const verificationTokenExpireTime = Date.now() + 1 * 60 * 60 * 1000; // 1 hour
-  const verificationTokenExpireTime = Date.now() + 10 * 60 * 1000; // 10 minute
-
-  // create user
-  const newUser = await User.create({
-    ...payload,
-    verificationToken,
-    verificationTokenExpiresAt: verificationTokenExpireTime,
-  });
-
-  // send email
-  await sendEmail({
-    to: email,
-    subject: "Email Verification Code TripNest LTD",
-    // text: verificationToken,
-    text: `Your email verification code is: ` + verificationToken,
-  });
-
-  // If failed to create an user
-  if (!newUser) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Failed to create user");
-  }
-
-  return {
-    newUser,
-  };
-};
-const verifyEmail = async (code: string) => {
-  const user = await User.findOne({
-    verificationToken: code,
-    verificationTokenExpiresAt: { $gt: Date.now() },
-  });
-
-  if (!user) {
-    throw new AppError(409, "Invalid or expired verification code");
-  }
-
-  await User.findOneAndUpdate(
-    {
-      email: user.email,
-      role: user.role,
-    },
-    {
-      isVerified: true,
-      verificationToken: "",
-      verificationTokenExpiresAt: null,
-    }
-  );
-  return {
-    user,
-  };
-};
-
-const resendVerifyEmailCode = async (payload: any) => {
-  // Check if user exists
-  const user = await User.isUserExistsByEmail(payload);
-  if (!user) {
-    throw new AppError(409, "User Not Found");
-  }
-
-  // for verification by Email
-  // make random 6 digit of code
-  const verificationToken = Math.floor(
-    100000 + Math.random() * 900000
-  ).toString();
-  // Expire time in 1 hour
-  //const verificationTokenExpireTime = Date.now() + 1 * 60 * 60 * 1000; // 1 hour
-  const verificationTokenExpireTime = Date.now() + 10 * 60 * 1000; // 10 minute // 10 minute
-
-  // update user
-  const updateUser = await User.findOneAndUpdate(
-    {
-      email: user.email,
-    },
-    {
-      isVerified: false,
-      verificationToken: verificationToken,
-      verificationTokenExpiresAt: verificationTokenExpireTime,
-    }
-  );
-
-  // send email
-  await sendEmail({
-    to: payload,
-    subject: "Email Verification Code TripNest LTD",
-    // text: verificationToken,
-    text: `Your Verification Code is: ` + verificationToken,
-  });
-
-  // If failed to create an user
-  if (!updateUser) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "Failed to update with new code"
+  try {
+    // Check rate limiting
+    await checkRateLimit(
+      `signup:${email}`,
+      AUTH_CONFIG.RATE_LIMIT.SIGNUP.MAX_ATTEMPTS,
+      AUTH_CONFIG.RATE_LIMIT.SIGNUP.WINDOW_MS
     );
-  }
 
-  return {
-    updateUser,
-  };
+    // Validate password strength
+    if (!validatePassword(payload.password)) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Password does not meet security requirements"
+      );
+    }
+
+    // Check if user exists
+    const existingUser = await User.isUserExistsByEmail(email);
+    if (existingUser) {
+      throw new AppError(409, "User already exists");
+    }
+
+    // Generate verification code and expiry time
+    const verificationCode = generateVerificationCode();
+    const expiresAt = Date.now() + AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60 * 1000;
+
+    // Create user
+    const newUser = await User.create({
+      ...payload,
+      failedLoginAttempts: 0,
+      accountLocked: false,
+    });
+
+    if (!newUser) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Failed to create user");
+    }
+
+    // Cache verification data
+    const verificationData: IVerificationData = {
+      code: verificationCode,
+      expiresAt,
+      attempts: 0
+    };
+
+    await cacheData(
+      `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`,
+      verificationData,
+      AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60
+    );
+
+    // Send verification email
+    await sendEmail({
+      to: email,
+      subject: "Email Verification Code",
+      text: `Your email verification code is: ${verificationCode}`,
+    });
+
+    return { newUser };
+  } catch (error) {
+    // Clean up cache if user creation fails
+    if (error instanceof AppError && error.statusCode === httpStatus.BAD_REQUEST) {
+      await deleteCachedData(`${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`);
+    }
+    throw error;
+  }
 };
 
-const loginUser = async (payload: IUser) => {
-  const user = await User.isUserExistsByEmail(payload.email);
+/**
+ * Verifies user email using cached verification code
+ */
+const verifyEmail = async (email: string, code: string): Promise<{ user: IUser }> => {
+  try {
+    // Get verification data from cache
+    const verificationData = await getCachedData(
+      `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`
+    ) as IVerificationData | null;
 
-  if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, "Email not found!");
+    if (!verificationData) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Verification code expired or not found");
+    }
+
+    if (verificationData.attempts >= 3) {
+      throw new AppError(httpStatus.TOO_MANY_REQUESTS, "Too many verification attempts");
+    }
+
+    if (verificationData.code !== code) {
+      // Increment attempts
+      verificationData.attempts++;
+      await cacheData(
+        `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`,
+        verificationData,
+        AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60
+      );
+      throw new AppError(httpStatus.BAD_REQUEST, "Invalid verification code");
+    }
+
+    if (verificationData.expiresAt < Date.now()) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Verification code expired");
+    }
+
+    // Update user verification status
+    const user = await User.findOneAndUpdate(
+      { email },
+      { isVerified: true },
+      { new: true }
+    );
+
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found");
+    }
+
+    // Clear verification data from cache
+    await deleteCachedData(`${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`);
+
+    return { user };
+  } catch (error) {
+    throw error;
   }
-
-  const isMatched = await User.isPasswordMatched(
-    payload.password,
-    user.password
-  );
-  if (!isMatched) {
-    throw new AppError(httpStatus.FORBIDDEN, "Wrong Password");
-  }
-
-  const jwtPayload = {
-    email: user.email,
-    role: user.role,
-  };
-
-  // ✅ No need to pass secrets anymore
-  const accessToken = createToken(jwtPayload);
-  const refreshToken = createToken(jwtPayload, { isRefresh: true });
-
-  // Clear and cache
-  const prefix = config.redis_cache_key_prefix;
-  await deleteCachedData(`${prefix}:user:${user.email}:accessToken`);
-  await deleteCachedData(`${prefix}:user:${user.email}:refreshToken`);
-
-  await cacheData(
-    `${prefix}:user:${user.email}:accessToken`,
-    accessToken,
-    parseInt(config.redis_ttl_access_token as string)
-  );
-  await cacheData(
-    `${prefix}:user:${user.email}:refreshToken`,
-    refreshToken,
-    parseInt(config.redis_ttl_refresh_token as string)
-  );
-
-  return {
-    refreshToken,
-    accessToken,
-    user,
-  };
 };
 
-const forgotPassword = async (payload: IUser) => {
-  // checking if the user is exist
-  const user = await User.isUserExistsByEmail(payload.email);
+/**
+ * Resends verification code with rate limiting
+ */
+const resendVerifyEmailCode = async (email: string): Promise<void> => {
+  try {
+    // Check rate limiting
+    await checkRateLimit(
+      `resend:${email}`,
+      AUTH_CONFIG.RATE_LIMIT.SIGNUP.MAX_ATTEMPTS,
+      AUTH_CONFIG.RATE_LIMIT.SIGNUP.WINDOW_MS
+    );
 
-  if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, "User not found !");
+    const user = await User.isUserExistsByEmail(email);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found");
+    }
+
+    if (user.isVerified) {
+      throw new AppError(httpStatus.BAD_REQUEST, "User is already verified");
+    }
+
+    // Generate new verification code
+    const verificationCode = generateVerificationCode();
+    const expiresAt = Date.now() + AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60 * 1000;
+
+    // Cache new verification data
+    const verificationData: IVerificationData = {
+      code: verificationCode,
+      expiresAt,
+      attempts: 0
+    };
+
+    await cacheData(
+      `${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${email}`,
+      verificationData,
+      AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60
+    );
+
+    // Send new verification email
+    await sendEmail({
+      to: email,
+      subject: "New Email Verification Code TripNest LTD",
+      text: `Your new verification code is: ${verificationCode}`,
+    });
+  } catch (error) {
+    throw error;
   }
+};
 
-  // Generate reset token
-  const resetToken = crypto.randomBytes(20).toString("hex");
-  //const resetTokenExpiresAt = Date.now() + 5 * 60 * 1000; // 1 hour
-  const resetTokenExpiresAt = Date.now() + 10 * 60 * 1000; // 10 minute
+/**
+ * Handles user login with rate limiting and account locking
+ */
+const loginUser = async (payload: ILoginUser): Promise<{ user: IUser; accessToken: string; refreshToken: string }> => {
+  const { email, password } = payload;
 
-  await User.findOneAndUpdate(
-    {
+  try {
+    // Check rate limiting
+    await checkRateLimit(
+      `login:${email}`,
+      AUTH_CONFIG.RATE_LIMIT.LOGIN.MAX_ATTEMPTS,
+      AUTH_CONFIG.RATE_LIMIT.LOGIN.WINDOW_MS
+    );
+
+    const user = await User.isUserExistsByEmail(email);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "Email not found!");
+    }
+
+    // Check if account is locked
+    if (user.isAccountLocked()) {
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        "Account is locked. Please try again later."
+      );
+    }
+
+    const isMatched = await User.isPasswordMatched(password, user.password);
+    if (!isMatched) {
+      await user.incrementFailedLoginAttempts();
+      throw new AppError(httpStatus.FORBIDDEN, "Wrong Password");
+    }
+
+    // Reset failed login attempts on successful login
+    await user.resetFailedLoginAttempts();
+
+    const jwtPayload: ITokenPayload = {
       email: user.email,
       role: user.role,
-    },
-    {
-      resetPasswordToken: resetToken,
-      resetPasswordExpiresAt: resetTokenExpiresAt,
-    }
-  );
+    };
 
-  const resetUILink = `${config.reset_pass_ui_link}${resetToken}`;
+    const accessToken = createToken(jwtPayload);
+    const refreshToken = createToken(jwtPayload, { isRefresh: true });
 
-  // send email
-  await sendEmail({
-    to: user.email,
-    subject: "check your email",
-    text: resetUILink,
-  });
+    await User.findOneAndUpdate(
+      { email },
+      { lastLogin: new Date() }
+    );
+
+    // Cache tokens
+    const prefix = config.redis_cache_key_prefix || 'auth';
+    await Promise.all([
+      cacheData(
+        `${prefix}:user:${email}:accessToken`,
+        accessToken,
+        parseInt(config.redis_ttl_access_token as string) || 3600
+      ),
+      cacheData(
+        `${prefix}:user:${email}:refreshToken`,
+        refreshToken,
+        parseInt(config.redis_ttl_refresh_token as string) || 604800
+      )
+    ]);
+
+    return {
+      user,
+      accessToken,
+      refreshToken,
+    };
+  } catch (error) {
+    throw error;
+  }
 };
 
-const resetPassword = async (password: string, token: string) => {
-  const user = await User.findOne({
-    resetPasswordToken: token,
-    resetPasswordExpiresAt: { $gt: Date.now() },
-  });
+/**
+ * Handles password reset request
+ */
+const forgotPassword = async (email: string): Promise<void> => {
+  try {
+    // Check rate limiting
+    await checkRateLimit(
+      `reset:${email}`,
+      AUTH_CONFIG.RATE_LIMIT.PASSWORD_RESET.MAX_ATTEMPTS,
+      AUTH_CONFIG.RATE_LIMIT.PASSWORD_RESET.WINDOW_MS
+    );
 
-  if (!user) {
-    throw new AppError(httpStatus.FORBIDDEN, "Invalid or expired reset token");
-  }
-
-  const newHashedPassword = await bcrypt.hash(
-    password,
-    Number(config.bcrypt_salt_rounds)
-  );
-
-  await User.findOneAndUpdate(
-    {
-      email: user.email,
-      role: user.role,
-    },
-    {
-      password: newHashedPassword,
-      resetPasswordToken: "",
-      resetPasswordExpiresAt: null,
+    const user = await User.isUserExistsByEmail(email);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found!");
     }
-  );
+
+    const resetToken = crypto
+      .randomBytes(AUTH_CONFIG.PASSWORD_RESET_TOKEN_LENGTH)
+      .toString("hex");
+    
+    const expiresAt = Date.now() + AUTH_CONFIG.RESET_TOKEN_EXPIRY_MINUTES * 60 * 1000;
+
+    // Cache reset token data
+    const resetData: IResetPasswordData = {
+      token: resetToken,
+      expiresAt,
+      attempts: 0
+    };
+
+    await cacheData(
+      `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RESET_PASSWORD}${email}`,
+      resetData,
+      AUTH_CONFIG.RESET_TOKEN_EXPIRY_MINUTES * 60
+    );
+
+    const resetUILink = `${config.reset_pass_ui_link}${resetToken}`;
+
+    await sendEmail({
+      to: email,
+      subject: "Password Reset Request",
+      text: `Click the following link to reset your password: ${resetUILink}`,
+    });
+  } catch (error) {
+    throw error;
+  }
+};
+
+/**
+ * Handles password reset with token validation
+ */
+const resetPassword = async (email: string, token: string, newPassword: string): Promise<void> => {
+  try {
+    if (!validatePassword(newPassword)) {
+      throw new AppError(
+        httpStatus.BAD_REQUEST,
+        "Password does not meet security requirements"
+      );
+    }
+
+    // Get reset token data from cache
+    const resetData = await getCachedData(
+      `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RESET_PASSWORD}${email}`
+    ) as IResetPasswordData | null;
+
+    if (!resetData) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Reset token expired or not found");
+    }
+
+    if (resetData.attempts >= 3) {
+      throw new AppError(httpStatus.TOO_MANY_REQUESTS, "Too many reset attempts");
+    }
+
+    if (resetData.token !== token) {
+      // Increment attempts
+      resetData.attempts++;
+      await cacheData(
+        `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RESET_PASSWORD}${email}`,
+        resetData,
+        AUTH_CONFIG.RESET_TOKEN_EXPIRY_MINUTES * 60
+      );
+      throw new AppError(httpStatus.BAD_REQUEST, "Invalid reset token");
+    }
+
+    if (resetData.expiresAt < Date.now()) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Reset token expired");
+    }
+
+    const user = await User.isUserExistsByEmail(email);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found");
+    }
+
+    // Update password
+    const newHashedPassword = await bcrypt.hash(
+      newPassword,
+      Number(config.bcrypt_salt_rounds)
+    );
+
+    await User.findOneAndUpdate(
+      { email },
+      { password: newHashedPassword }
+    );
+
+    // Clear reset token from cache
+    await deleteCachedData(`${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RESET_PASSWORD}${email}`);
+  } catch (error) {
+    throw error;
+  }
 };
 
 const getUsers = async (filters: any) => {
@@ -302,7 +458,7 @@ const refreshTokenService = async (res: any, token: string) => {
 
     if (cachedToken !== token) {
 
-      removeTokens(res, prefix, email);
+      removeTokens(res, prefix as string, email);
 
       throw new AppError(httpStatus.UNAUTHORIZED, "Token is not valid");
     }
@@ -310,14 +466,14 @@ const refreshTokenService = async (res: any, token: string) => {
     const user = await User.isUserExistsByEmail(email);
 
     if (!user) {
-      removeTokens(res, prefix, email);
+      removeTokens(res, prefix as string, email);
       throw new AppError(httpStatus.NOT_FOUND, "This user is not found!");
     }
 
     const jwtPayload = {
       // id: user._id,
       email: user.email,
-      role: user.role as string,
+      role: user.role as UserRole,
     };
 
     const accessToken = createToken(jwtPayload);
@@ -345,158 +501,85 @@ const refreshTokenService = async (res: any, token: string) => {
   }
 };
 
-// const ChangeRole = async (email: string, role: string, payload:any) => {
-//   const user = await User.isUserExistsByEmail(email);
+/**
+ * Handles role changes with proper authorization checks
+ */
+const changeRole = async (
+  email: string,
+  newRole: UserRole,
+  currentUser: JwtPayload
+): Promise<IUser> => {
+  try {
+    const user = await User.isUserExistsByEmail(email);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found!");
+    }
 
-//   if (!user) {
-//     throw new AppError(httpStatus.NOT_FOUND, "This user is not found!");
-//   }
+    if (!canModifyRole(currentUser.role, user.role, newRole)) {
+      throw new AppError(
+        httpStatus.FORBIDDEN,
+        "You don't have permission to perform this action"
+      );
+    }
 
-//   if(role  === "superAdmin"){
-//     throw new AppError(httpStatus.UNAUTHORIZED, "You can't change super admin role!");
-//   }
-
-//   if (user.role === role) {
-//     throw new AppError(httpStatus.UNAUTHORIZED, "This user already has this role!");
-//   }
-//   if (user.role === "superAdmin") {
-//     throw new AppError(httpStatus.UNAUTHORIZED, "You can't change super admin role!");
-//   }
-
-//   if (user.role === "admin" && role === "superAdmin") {
-//     throw new AppError(httpStatus.UNAUTHORIZED, "You can't change admin to super admin!");
-//   }
-
-//   if(user.role === payload.role && user.email === payload.email){
-//     throw new AppError(httpStatus.UNAUTHORIZED, "You can't change your own role!");
-//   }
-
-//   const updatedUser = await User.findOneAndUpdate(
-//     { email: email },
-//     { role: role },
-//     { new: true }
-//   );
-
-//   if (!updatedUser) {
-//     throw new AppError(httpStatus.BAD_REQUEST, "Failed to update user role");
-//   }
-
-//   return updatedUser;
-// }
-
-enum UserRole {
-  ADMIN = "admin",
-  SUPER_ADMIN = "superAdmin",
-  MODERATOR = "moderator",
-  CUSTOMER = "customer",
-}
-
-const changeRole = async (email: string, newRole: string, payload: any) => {
-  const user = await User.isUserExistsByEmail(email);
-
-  if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, "This user is not found!");
-  }
-
-  if (newRole === UserRole.SUPER_ADMIN) {
-    throw new AppError(httpStatus.BAD_REQUEST, "You can't make super admin!");
-  }
-
-  if (newRole === UserRole.ADMIN && payload.role === UserRole.ADMIN) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't make admin as admin!"
+    const updatedUser = await User.findOneAndUpdate(
+      { email },
+      { role: newRole },
+      { new: true }
     );
+
+    if (!updatedUser) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Failed to update user role");
+    }
+
+    return updatedUser;
+  } catch (error) {
+    throw error;
   }
-
-  if (user.email === payload.email && user.role === payload.role) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't change your own role!"
-    );
-  }
-
-  if (user.role === UserRole.SUPER_ADMIN || newRole === UserRole.SUPER_ADMIN) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't change super admin role!"
-    );
-  }
-
-  if (user.role === newRole) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "This user already has this role!"
-    );
-  }
-
-  if (user.role === UserRole.ADMIN && newRole === UserRole.SUPER_ADMIN) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't change admin to super admin!"
-    );
-  }
-
-  // if (payload.role === UserRole.ADMIN) {
-  //   throw new AppError(httpStatus.BAD_REQUEST, "You can't change admin role!");
-  // }
-
-  const updatedUser = await User.findOneAndUpdate(
-    { email },
-    { role: newRole },
-    { new: true }
-  );
-
-  if (!updatedUser) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Failed to update user role");
-  }
-
-  // Optionally log this event here
-
-  return updatedUser;
 };
 
-const deleteUser = async (id: string, payload: any) => {
-  // const user = await User.isUserExistsByEmail(email);
-  const user = await User.findById(id);
+/**
+ * Handles user deletion with proper authorization checks
+ */
+const deleteUser = async (
+  id: string,
+  currentUser: JwtPayload
+): Promise<IUser> => {
+  try {
+    const user = await User.findById(id);
+    if (!user) {
+      throw new AppError(httpStatus.NOT_FOUND, "User not found!");
+    }
 
-  if (!user) {
-    throw new AppError(httpStatus.NOT_FOUND, "This user is not found!");
+    if (currentUser.role !== UserRole.SUPER_ADMIN) {
+      throw new AppError(httpStatus.FORBIDDEN, "Only super admin can delete users");
+    }
+
+    if (user.role === UserRole.SUPER_ADMIN) {
+      throw new AppError(httpStatus.FORBIDDEN, "Cannot delete super admin");
+    }
+
+    if (user.email === currentUser.email) {
+      throw new AppError(httpStatus.FORBIDDEN, "Cannot delete your own account");
+    }
+
+    const deletedUser = await User.findByIdAndDelete(id);
+    if (!deletedUser) {
+      throw new AppError(httpStatus.BAD_REQUEST, "Failed to delete user");
+    }
+
+    // Clear user's cached data
+    await Promise.all([
+      deleteCachedData(`${config.redis_cache_key_prefix}:user:${user.email}:accessToken`),
+      deleteCachedData(`${config.redis_cache_key_prefix}:user:${user.email}:refreshToken`),
+      deleteCachedData(`${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.VERIFICATION}${user.email}`),
+      deleteCachedData(`${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RESET_PASSWORD}${user.email}`)
+    ]);
+
+    return deletedUser;
+  } catch (error) {
+    throw error;
   }
-
-  if (payload.role !== "superAdmin") {
-    throw new AppError(httpStatus.BAD_REQUEST, "You can't delete user!");
-  }
-
-  if (user.role === "superAdmin") {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't delete super admin role!"
-    );
-  }
-
-  if (user.role === payload.role && user.email === payload.email) {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't delete your own account!"
-    );
-  }
-  if (user.role === "admin" && payload.role === "admin") {
-    throw new AppError(
-      httpStatus.BAD_REQUEST,
-      "You can't delete admin account!"
-    );
-  }
-
-  // const deletedUser = await User.findOneAndDelete({ email });
-  const deletedUser = await User.findByIdAndDelete(id);
-
-
-  if (!deletedUser) {
-    throw new AppError(httpStatus.BAD_REQUEST, "Failed to delete user");
-  }
-
-  return deletedUser;
 };
 
 export const AuthServices = {
