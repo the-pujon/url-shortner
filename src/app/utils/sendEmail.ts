@@ -4,21 +4,22 @@ import AppError from '../errors/AppError';
 import httpStatus from 'http-status';
 import fs from 'fs';
 import path from 'path';
+import config from '../config';
 
 // Setup the transporter for sending emails
 export const sendEmail = async (options: any) => {
   const transporter = nodemailer.createTransport({
-    host: "smtp.zoho.com",
-    port: 465,
+    host: config.email_host,
+    port: Number(config.email_port),
     secure: true,
     auth: {
-      user: "tripnestlimited@tripnest.net", 
-      pass: '7LX5dD4TSSQ0',  
+      user: config.email_user, 
+      pass: config.email_pass,  
     },
   });
 
   const mailOptions = {
-    from: "tripnestlimited@tripnest.net",  
+    from: config.email_user,  
     to: options.to,
     subject: options.subject,
     text: options.text,

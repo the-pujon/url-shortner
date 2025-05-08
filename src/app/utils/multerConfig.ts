@@ -4,11 +4,11 @@ import multer from 'multer';
 import { CloudinaryStorage } from 'multer-storage-cloudinary';
 import { v2 as cloudinary } from 'cloudinary';
 import path from 'path';
-
+import config from '../config';
 cloudinary.config({
-  cloud_name: 'dz8yadrmu',
-  api_key: '936931592697431',
-  api_secret: 'NS7uCJKFq8PoMDAFN6zAd1N0miY',
+  cloud_name: config.cloudinary_cloud_name,
+  api_key: config.cloudinary_api_key,
+  api_secret: config.cloudinary_api_secret,
 });
 
 

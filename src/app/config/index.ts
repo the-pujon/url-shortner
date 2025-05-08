@@ -38,4 +38,9 @@ export default {
   redis_ttl_access_token: process.env.REDIS_TTL_ACCESS_TOKEN,
   redis_ttl_refresh_token: process.env.REDIS_TTL_REFRESH_TOKEN,
 
+  email_host: process.env.EMAIL_HOST,
+  email_port: process.env.EMAIL_PORT,
+  email_user: process.env.EMAIL_USER,
+  email_pass: process.env.EMAIL_PASS,
+
 };
