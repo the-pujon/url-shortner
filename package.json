@@ -1,0 +1,44 @@
+{
+  "name": "tpn-ota-backend",
+  "version": "1.0.0",
+  "main": "src/server.ts",
+  "scripts": {
+    "dev": "ts-node-dev --respawn --transpile-only src/server.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "TripNestLtd.",
+  "license": "ISC",
+  "description": "",
+  "devDependencies": {
+    "@types/bcrypt": "^5.0.2",
+    "@types/cookie-parser": "^1.4.7",
+    "@types/cors": "^2.8.17",
+    "@types/express": "^4.17.21",
+    "@types/jsonwebtoken": "^9.0.9",
+    "@types/multer": "^1.4.12",
+    "@types/uuid": "^10.0.0",
+    "typescript": "^5.5.4"
+  },
+  "dependencies": {
+    "@types/nodemailer": "^6.4.15",
+    "bcrypt": "^5.1.1",
+    "body-parser": "^1.20.3",
+    "cloudinary": "1.21.0",
+    "cookie-parser": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.0",
+    "fs": "^0.0.1-security",
+    "http-status": "^1.7.4",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.5.4",
+    "multer": "^1.4.5-lts.1",
+    "multer-storage-cloudinary": "^4.0.0",
+    "nodemailer": "^6.9.14",
+    "redis": "^4.7.0",
+    "sslcommerz-lts": "^1.1.0",
+    "ts-node-dev": "^2.0.0",
+    "uuid": "^10.0.0",
+    "zod": "^3.23.8"
+  }
+}
