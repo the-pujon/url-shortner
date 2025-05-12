@@ -43,7 +43,7 @@ app.use(cookieParser());
 app.use('/api/v1', router);   
 
 app.get('/', (req: Request, res: Response) => {
-  res.send('Hi TripNest v2!! you are live now!!!!');
+  res.send('Hi Express Server v2!! you are live now!!!!');
 });
 
 app.use(globalErrorHandler);

@@ -1,4 +1,4 @@
-import { sendEmail } from "./../../utils/sendEmail";
+import { sendEmail, getEmailTemplate } from "./../../utils/sendEmail";
 import httpStatus from "http-status";
 import AppError from "../../errors/AppError";
 import { 
@@ -24,6 +24,7 @@ import {
 import { JsonWebTokenError, JwtPayload, TokenExpiredError } from "jsonwebtoken";
 import jwt from "jsonwebtoken";
 import { AUTH_CONFIG } from "./auth.config";
+import { setImmediate } from "timers";
 
 // Constants for configuration
 const VERIFICATION_TOKEN_LENGTH = 6;
@@ -44,12 +45,15 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
   const { email } = payload;
 
   try {
+    const start = Date.now();
+
     // Check rate limiting
     await checkRateLimit(
       `signup:${email}`,
       AUTH_CONFIG.RATE_LIMIT.SIGNUP.MAX_ATTEMPTS,
       AUTH_CONFIG.RATE_LIMIT.SIGNUP.WINDOW_MS
     );
+    console.log('Validation:', Date.now() - start);
 
     // Validate password strength
     if (!validatePassword(payload.password)) {
@@ -58,12 +62,14 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
         "Password does not meet security requirements"
       );
     }
+    console.log('Validation:', Date.now() - start);
 
     // Check if user exists
     const existingUser = await User.isUserExistsByEmail(email);
     if (existingUser) {
       throw new AppError(409, "User already exists");
     }
+    console.log('User check:', Date.now() - start);
 
     // Generate verification code and expiry time
     const verificationCode = generateVerificationCode();
@@ -75,6 +81,7 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
       failedLoginAttempts: 0,
       accountLocked: false,
     });
+    console.log('DB save:', Date.now() - start);
 
     if (!newUser) {
       throw new AppError(httpStatus.BAD_REQUEST, "Failed to create user");
@@ -93,13 +100,25 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
       AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60
     );
 
-    // Send verification email
-    await sendEmail({
-      to: email,
-      subject: "Email Verification Code",
-      text: `Your email verification code is: ${verificationCode}`,
+    // Get email template and replace placeholders
+    const emailTemplate = getEmailTemplate('verification-email.html', {
+      code: verificationCode,
+      expiryTime: AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES,
+      year: new Date().getFullYear()
     });
 
+    // Send verification email asynchronously
+    setImmediate(() => {
+      sendEmail({
+        to: email,
+        subject: "Email Verification Code",
+        html: emailTemplate
+      }).catch(err => {
+        console.error("Failed to send verification email:", err);
+      });
+    });
+
+    // Return response immediately
     return { newUser };
   } catch (error) {
     // Clean up cache if user creation fails
@@ -201,11 +220,18 @@ const resendVerifyEmailCode = async (email: string): Promise<void> => {
       AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES * 60
     );
 
+    // Get email template and replace placeholders
+    const emailTemplate = getEmailTemplate('verification-email.html', {
+      code: verificationCode,
+      expiryTime: AUTH_CONFIG.VERIFICATION_TOKEN_EXPIRY_MINUTES,
+      year: new Date().getFullYear()
+    });
+
     // Send new verification email
     await sendEmail({
       to: email,
-      subject: "New Email Verification Code TripNest LTD",
-      text: `Your new verification code is: ${verificationCode}`,
+      subject: "New Email Verification Code",
+      html: emailTemplate
     });
   } catch (error) {
     throw error;
@@ -324,10 +350,17 @@ const forgotPassword = async (email: string): Promise<void> => {
 
     const resetUILink = `${config.reset_pass_ui_link}${resetToken}`;
 
+    // Get email template and replace placeholders
+    const emailTemplate = getEmailTemplate('reset-password-email.html', {
+      resetLink: resetUILink,
+      expiryTime: AUTH_CONFIG.RESET_TOKEN_EXPIRY_MINUTES,
+      year: new Date().getFullYear()
+    });
+
     await sendEmail({
       to: email,
       subject: "Password Reset Request",
-      text: `Click the following link to reset your password: ${resetUILink}`,
+      html: emailTemplate
     });
   } catch (error) {
     throw error;

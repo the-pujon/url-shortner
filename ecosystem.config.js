@@ -1,7 +1,7 @@
 module.exports = {
   apps: [
     {
-      name: 'tripnest-backend',
+      name: 'express-server',
       script: 'dist/server.js',
       env: {
         NODE_ENV: 'production',
