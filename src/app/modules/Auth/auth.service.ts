@@ -53,7 +53,7 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
       AUTH_CONFIG.RATE_LIMIT.SIGNUP.MAX_ATTEMPTS,
       AUTH_CONFIG.RATE_LIMIT.SIGNUP.WINDOW_MS
     );
-    console.log('Validation:', Date.now() - start);
+    // console.log('Validation:', Date.now() - start);
 
     // Validate password strength
     if (!validatePassword(payload.password)) {
@@ -62,14 +62,14 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
         "Password does not meet security requirements"
       );
     }
-    console.log('Validation:', Date.now() - start);
+    // console.log('Validation:', Date.now() - start);
 
     // Check if user exists
     const existingUser = await User.isUserExistsByEmail(email);
     if (existingUser) {
       throw new AppError(409, "User already exists");
     }
-    console.log('User check:', Date.now() - start);
+    // console.log('User check:', Date.now() - start);
 
     // Generate verification code and expiry time
     const verificationCode = generateVerificationCode();
@@ -81,7 +81,7 @@ const signupUser = async (payload: IUser): Promise<{ newUser: IUser }> => {
       failedLoginAttempts: 0,
       accountLocked: false,
     });
-    console.log('DB save:', Date.now() - start);
+    // console.log('DB save:', Date.now() - start);
 
     if (!newUser) {
       throw new AppError(httpStatus.BAD_REQUEST, "Failed to create user");
@@ -258,7 +258,7 @@ const loginUser = async (payload: ILoginUser): Promise<{ user: IUser; accessToke
     }
 
     // Check if account is locked
-    if (user.isAccountLocked()) {
+    if (user.accountLocked) {
       throw new AppError(
         httpStatus.FORBIDDEN,
         "Account is locked. Please try again later."
