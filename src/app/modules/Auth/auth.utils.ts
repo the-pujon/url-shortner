@@ -176,5 +176,10 @@ export const canModifyRole = (
     );
   }
 
+  // Customer cannot modify any roles
+  if (currentUserRole === UserRole.CUSTOMER) {
+    return false;
+  }
+
   return false;
 };
