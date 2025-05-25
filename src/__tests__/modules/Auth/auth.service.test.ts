@@ -1,4 +1,3 @@
-
 import httpStatus from "http-status";
 import AppError from "../../../app/errors/AppError";
 import { IUser } from "../../../app/modules/Auth/auth.interface";
@@ -7,7 +6,9 @@ import { AuthServices } from "../../../app/modules/Auth/auth.service";
 import { cacheData, deleteCachedData } from "../../../app/utils/redis.utils";
 import { getCachedData } from "../../../app/utils/redis.utils";
 import { sendEmail } from "../../../app/utils/sendEmail";
-import { checkRateLimit } from "../../../app/modules/Auth/auth.utils";
+import { checkRateLimit, removeTokens } from "../../../app/modules/Auth/auth.utils";
+import jwt, { JwtPayload } from "jsonwebtoken";
+import { TokenExpiredError } from "jsonwebtoken";
 
 jest.mock("../../../app/modules/Auth/auth.model");
 jest.mock("../../../app/utils/redis.utils");
@@ -313,4 +314,191 @@ describe("AuthService", () => {
       expect(result).toHaveProperty('refreshToken');
     });
   });
+
+  describe("Forgot Password", ()=>{
+    it("should throw error if user is not found", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(null);
+      (checkRateLimit as jest.Mock).mockResolvedValue(undefined);
+
+      await expect(AuthServices.forgotPassword("test@example.com")).rejects.toThrow(new AppError(httpStatus.NOT_FOUND, "User not found!"));
+    })  
+
+    it("should throw error if rate limit is exceeded", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+      (checkRateLimit as jest.Mock).mockRejectedValue(
+        new AppError(httpStatus.TOO_MANY_REQUESTS, "Too many attempts. Please try again later.")
+      );
+
+      await expect(AuthServices.forgotPassword("test@example.com")).rejects.toThrow(new AppError(httpStatus.TOO_MANY_REQUESTS, "Too many attempts. Please try again later."));
+    })
+
+    it("should generate and send reset password email", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+      (checkRateLimit as jest.Mock).mockResolvedValue(undefined);
+      (cacheData as jest.Mock).mockResolvedValue(undefined);
+
+      await AuthServices.forgotPassword("test@example.com");
+
+      expect(cacheData).toHaveBeenCalled();
+
+    })
+  })
+
+  describe("Reset Password", ()=>{
+    it("should throw error if user is not found", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(null);
+      // (checkRateLimit as jest.Mock).mockResolvedValue(undefined);
+      (getCachedData as jest.Mock).mockResolvedValue({
+        token: "123456",
+        expiresAt: Date.now() + 1000 * 60 * 10, // 10 minutes from now
+        attempts: 0,
+      });
+
+      await expect(AuthServices.resetPassword("test@example.com", "123456", "Test@123456")).rejects.toThrow(new AppError(httpStatus.BAD_REQUEST, "User not found"));
+    })
+
+    it("should throw error if reset token is expired", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+      // (checkRateLimit as jest.Mock).mockResolvedValue(undefined);
+      (getCachedData as jest.Mock).mockResolvedValue(null);
+
+      await expect(AuthServices.resetPassword("test@example.com", "123456", "Test@123456")).rejects.toThrow(new AppError(httpStatus.BAD_REQUEST, "Reset token expired or not found"));
+    })
+
+    it("should throw error if too many reset attempts", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+      (getCachedData as jest.Mock).mockResolvedValue({
+        token: "123456",
+        expiresAt: Date.now() + 1000 * 60 * 10, // 10 minutes from now
+        attempts: 3,
+      });
+
+      await expect(AuthServices.resetPassword("test@example.com", "123456", "Test@123456")).rejects.toThrow(new AppError(httpStatus.TOO_MANY_REQUESTS, "Too many reset attempts"));
+    })
+
+    it("should reset password successfully", async ()=>{
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+      (getCachedData as jest.Mock).mockResolvedValue({
+        token: "123456",
+        expiresAt: Date.now() + 1000 * 60 * 10, // 10 minutes from now
+        attempts: 0,
+      });
+
+      await AuthServices.resetPassword("test@example.com", "123456", "Test@123456");
+
+      expect(deleteCachedData).toHaveBeenCalled();
+    })
+  })
+
+  // describe("Get Users", () => {
+  //   // it("should throw error if no users are found", async ()=>{
+  //   //   (User.find as jest.Mock).mockResolvedValue([]);
+
+  //   //   await expect(AuthServices.getUsers({})).rejects.toThrow(new AppError(httpStatus.NOT_FOUND, "Users not found"));
+  //   // })
+
+  //   it("should get users successfully", async ()=>{
+  //     (User.find as jest.Mock).mockResolvedValue([mockUserData]);
+
+  //     const result = await AuthServices.getUsers({});
+
+  //     expect(result).toEqual([mockUserData]);
+  //   })
+  // })
+
+  describe("Refresh Token", () => {
+    it("should throw error if refresh token is not found", async () => {
+      
+      await expect(AuthServices.refreshTokenService("test@example.com",null)).rejects.toThrow(new AppError(httpStatus.UNAUTHORIZED, "You are not authorized. Login first"));
+
+    })
+
+    it("should throw error if refresh token is invalid", async () => {
+      const mockRes = {
+        clearCookie: jest.fn()
+      };
+      
+      // Mock a valid JWT token that can be decoded
+      const mockToken = "valid.jwt.token";
+      const mockEmail = "test@example.com";
+      
+      // Mock jwt.verify to return a decoded token
+      jest.spyOn(jwt, 'verify').mockImplementation(() => ({ email: mockEmail } as JwtPayload));
+      
+      // Mock getCachedData to return a different token
+      (getCachedData as jest.Mock).mockResolvedValue("different.cached.token");
+
+      await expect(AuthServices.refreshTokenService(mockRes, mockToken))
+        .rejects.toThrow(new AppError(httpStatus.UNAUTHORIZED, "Token is not valid"));
+    })
+
+
+    it("should throw error if user is not found", async () => {
+      const mockRes = {
+        clearCookie: jest.fn()
+      };
+      
+      // Mock a valid JWT token that can be decoded
+      const mockToken = "valid.jwt.token";
+      const mockEmail = "test@example.com";
+      
+      // Mock jwt.verify to return a decoded token
+      jest.spyOn(jwt, 'verify').mockImplementation(() => ({ email: mockEmail } as JwtPayload));
+      
+      // Mock getCachedData to return the same token
+      (getCachedData as jest.Mock).mockResolvedValue("valid.jwt.token");
+
+      // Mock User.isUserExistsByEmail to return null (user not found)
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(null);
+
+      await expect(AuthServices.refreshTokenService(mockRes, mockToken))
+        .rejects.toThrow(new AppError(httpStatus.NOT_FOUND, "This user is not found!"));
+    })
+
+    it("should throw error if token is expired", async ()=>{
+      const mockRes = {
+        clearCookie: jest.fn()
+      };
+      
+      const mockToken = "valid.jwt.token";
+      const mockEmail = "test@example.com";
+      
+      // Mock jwt.verify to throw TokenExpiredError
+      jest.spyOn(jwt, 'verify').mockImplementation(() => {
+        throw new TokenExpiredError('jwt expired', new Date());
+      });
+      
+      await expect(AuthServices.refreshTokenService(mockRes, mockToken))
+        .rejects.toThrow(new AppError(httpStatus.UNAUTHORIZED, "Your session has expired. Please login again."));
+    })
+
+    it("should set new access token", async ()=>{
+      const mockRes = {
+        clearCookie: jest.fn()
+      };
+
+      const mockToken = "valid.jwt.token";
+      const mockEmail = "test@example.com";
+
+      // Mock jwt.verify to return a decoded token
+      jest.spyOn(jwt, 'verify').mockImplementation(() => ({ email: mockEmail } as JwtPayload));
+
+      (User.isUserExistsByEmail as jest.Mock).mockResolvedValue(mockUserData);
+
+      (getCachedData as jest.Mock).mockResolvedValue("valid.jwt.token");
+
+      (User.findOneAndUpdate as jest.Mock).mockResolvedValue(mockUserData);
+
+      (cacheData as jest.Mock).mockResolvedValue(undefined);
+
+      const result = await AuthServices.refreshTokenService(mockRes, mockToken);
+
+      expect(result).toHaveProperty('accessToken');
+      expect(cacheData).toHaveBeenCalled();
+    })
+    
+    
+    
+  })
+
 });

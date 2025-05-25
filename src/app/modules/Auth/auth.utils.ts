@@ -7,6 +7,7 @@ import { cacheData, getCachedData } from "../../utils/redis.utils";
 import { Response } from "express";
 import AppError from "../../errors/AppError";
 import httpStatus from "http-status";
+import { getRedisClient } from "../../config/redis.config";
 
 interface TokenOptions {
   isRefresh?: boolean;
@@ -82,23 +83,35 @@ export const checkRateLimit = async (
   windowMs: number
 ): Promise<boolean> => {
   const cacheKey = `${config.redis_cache_key_prefix}:${AUTH_CONFIG.CACHE_PREFIXES.RATE_LIMIT}${key}`;
-  const attempts = await getCachedData(cacheKey);
-
-  // if no attempts, set 1 and return true
-  if (!attempts) {
-    await cacheData(cacheKey, 1, windowMs / 1000);
-    return true;
-  }
-
-  const currentAttempts = Number(attempts);
-  if (currentAttempts >= maxAttempts) {
+  const lockKey = `${cacheKey}:locked`;
+  const redisClient = await getRedisClient();
+  
+  // First check if we're in a locked state
+  const isLocked = await redisClient.get(lockKey);
+  if (isLocked) {
     throw new AppError(
       httpStatus.TOO_MANY_REQUESTS,
-      "Too many attempts. Please try again later."
+      `Rate limit exceeded. Please try again after ${windowMs / 1000} seconds.`
     );
   }
 
-  await cacheData(cacheKey, currentAttempts + 1, windowMs / 1000);
+  // Use Redis INCR to atomically increment the counter
+  const currentAttempts = await redisClient.incr(cacheKey);
+  
+  // Set expiry on first attempt
+  if (currentAttempts === 1) {
+    await redisClient.expire(cacheKey, windowMs / 1000);
+  }
+
+  if (currentAttempts > maxAttempts) {
+    // Set a lock with TTL instead of continuing to increment
+    await redisClient.setEx(lockKey, windowMs / 1000, '1');
+    throw new AppError(
+      httpStatus.TOO_MANY_REQUESTS,
+      `Rate limit exceeded. Please try again after ${windowMs / 1000} seconds.`
+    );
+  }
+
   return true;
 };
 

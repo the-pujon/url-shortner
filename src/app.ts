@@ -8,6 +8,7 @@ import globalErrorHandler from './app/middlewares/globalErrorhandler';
 import notFound from './app/middlewares/notFound';
 import cookieParser from "cookie-parser";
 import bodyParser from 'body-parser';
+import rateLimit from 'express-rate-limit';
 
 const app: Application = express();
 
@@ -39,6 +40,17 @@ app.use(cors({
 }));
 
 app.use(cookieParser());
+
+const limiter = rateLimit({
+	windowMs: 15 * 60 * 1000, // 15 minutes
+	limit: 100, // Limit each IP to 100 requests per `window` (here, per 15 minutes).
+	standardHeaders: 'draft-8', // draft-6: `RateLimit-*` headers; draft-7 & draft-8: combined `RateLimit` header
+	legacyHeaders: false, // Disable the `X-RateLimit-*` headers.
+	// store: ... , // Redis, Memcached, etc. See below.
+})
+
+// Apply the rate limiting middleware to all requests.
+app.use(limiter)
 // application routes
 app.use('/api/v1', router);   
 
