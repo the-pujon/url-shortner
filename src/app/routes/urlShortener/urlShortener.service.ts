@@ -1,32 +1,50 @@
-import AppError from "../../errors/AppError"
-import { ICreateShortUrl } from "./urlShortener.interface"
-import shortid from "shortid"
-import UrlShortener from "./urlShortener.model"
-import httpStatus from "http-status"
+import AppError from "../../errors/AppError";
+import { ICreateShortUrl } from "./urlShortener.interface";
+import shortid from "shortid";
+import UrlShortener from "./urlShortener.model";
+import httpStatus from "http-status";
 
+//create short url
 export const createShortUrl = async (payload: ICreateShortUrl) => {
-    try{
-        const shortId = shortid.generate()
-        if(!payload.mainUrl){
-            throw new AppError(400, "Main URL is required")
-        }
-
-        const urlExists = await UrlShortener.findOne({mainUrl: payload.mainUrl})
-        if(urlExists){
-            throw new AppError(400, "Url already exists")
-        }
-        await UrlShortener.create({
-            shortUrl: shortId,
-            mainUrl: payload.mainUrl,
-            totalClicks: 0
-        })
-        return null
-
-    }catch(error){
-        if(error instanceof AppError){
-            throw error
-        }
-        throw new AppError(400, "Error creating short url")
+  try {
+    //generate short id
+    const shortId = shortid.generate();
+    if (!payload.mainUrl) {
+      throw new AppError(400, "Main URL is required");
     }
 
-}
+    const urlExists = await UrlShortener.findOne({ mainUrl: payload.mainUrl });
+    if (urlExists) {
+      throw new AppError(400, "Url already exists");
+    }
+    const url = await UrlShortener.create({
+      shortUrl: shortId,
+      mainUrl: payload.mainUrl,
+      totalClicks: 0,
+    });
+    return url;
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(400, "Error creating short url");
+  }
+};
+
+//get short url
+export const getShortUrl = async (shortUrl: string) => {
+  try {
+    const url = await UrlShortener.findOne({ shortUrl });
+    if (!url) {
+      throw new AppError(404, "Url not found");
+    }
+    url.totalClicks!++;
+    await url.save();
+    return url;
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(400, "Error getting short url");
+  }
+};

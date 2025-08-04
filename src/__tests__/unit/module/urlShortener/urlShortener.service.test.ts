@@ -1,5 +1,5 @@
 import UrlShortener from "../../../../app/routes/urlShortener/urlShortener.model"
-import { createShortUrl } from "../../../../app/routes/urlShortener/urlShortener.service"
+import { createShortUrl, getShortUrl } from "../../../../app/routes/urlShortener/urlShortener.service"
 
 jest.mock("../../../../app/routes/urlShortener/urlShortener.model")
 
@@ -55,6 +55,36 @@ describe("Shorten URL", ()=>{
             await expect(createShortUrl(mockUrlShortener)).rejects.toThrow(mockError)
             expect(mockFindOne).toHaveBeenCalledWith({mainUrl: mockUrlShortener.mainUrl})
             expect(mockCreate).not.toHaveBeenCalled()
+        })
+    })
+
+    describe("get short url", () =>{
+        it("should redirect to the main url", async ()=>{
+            const mockUrlShortener = {
+                shortUrl: "abc123",
+                mainUrl: "https://www.google.com", 
+                totalClicks: 0,
+                save: jest.fn().mockResolvedValue(true)
+            }
+            const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
+            mockFindOne.mockResolvedValue(mockUrlShortener)
+            const result = await getShortUrl(mockUrlShortener.shortUrl)
+            expect(result).toEqual(mockUrlShortener)
+            expect(mockFindOne).toHaveBeenCalledWith({shortUrl: mockUrlShortener.shortUrl})
+            expect(mockUrlShortener.save).toHaveBeenCalled()
+            expect(mockUrlShortener.totalClicks).toBe(1)
+        })
+
+        it("should throw error if url not found", async () => {
+            const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
+            mockFindOne.mockResolvedValue(null)
+            await expect(getShortUrl("abc123")).rejects.toThrow("Url not found")
+        })
+
+        it("should throw error if anything goes wrong", async () => {
+            const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
+            mockFindOne.mockRejectedValue(new Error("Error finding url"))
+            await expect(getShortUrl("abc123")).rejects.toThrow("Error getting short url")
         })
     })
 
