@@ -1,16 +1,15 @@
 import { Router } from 'express';
-
-
+import urlShortenerRoute from './urlShortener/urlShortener.route';
 
 const router = Router();
 
 const moduleRoutes = [
   {
-    path: '/auth',
-    // route: ,
+    path: '/url-shortener',
+    route: urlShortenerRoute,
   },
 ];
 
-// moduleRoutes.forEach((route) => router.use(route.path, route.route));
+moduleRoutes.forEach((route) => router.use(route.path, route.route));
 
 export default router;

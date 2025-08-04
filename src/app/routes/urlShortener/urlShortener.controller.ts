@@ -1,16 +1,18 @@
-import { Request, Response } from "express"
+import { Request, Response, NextFunction } from "express"
 import { createShortUrl } from "./urlShortener.service"
 import AppError from "../../errors/AppError"
+import httpStatus from "http-status"
 
-export const createShortUrlController = async (req: Request, res: Response) => {
+export const createShortUrlController = async (req: Request, res: Response, next: NextFunction) => {
     try{
         await createShortUrl(req.body)
-        res.status(200).json({
+        res.status(httpStatus.CREATED).json({
             success: true,
             message: "Short url created successfully",
             data: []
         })
     }catch(error){
-        throw new AppError(400, "Error creating short url")
+        // Pass the error to the next middleware (global error handler)
+        next(error);
     }
 }
