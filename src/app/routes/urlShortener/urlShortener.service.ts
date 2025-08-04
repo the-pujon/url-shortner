@@ -7,6 +7,11 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
     try{
         const shortId = shortid.generate()
 
+
+        if(!payload.mainUrl){
+            throw new AppError(400, "Main URL is required")
+        }
+
         const urlExists = await UrlShortener.findOne({mainUrl: payload.mainUrl})
         if(urlExists){
             throw new AppError(400, "Url already exists")
@@ -19,7 +24,10 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
         return null
 
     }catch(error){
-        throw new AppError( 400 ,"Error creating short url")
+        if(error instanceof AppError){
+            throw error
+        }
+        throw new AppError(500, "Error creating short url")
     }
 
 }

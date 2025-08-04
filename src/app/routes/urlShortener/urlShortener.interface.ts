@@ -1,5 +1,5 @@
 export interface ICreateShortUrl {
-    shortUrl: string,
+    shortUrl?: string,
     mainUrl: string,
     createdAt?: Date,
     updatedAt?: Date,
