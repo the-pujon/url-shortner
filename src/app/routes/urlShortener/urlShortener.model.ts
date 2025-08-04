@@ -15,6 +15,10 @@ const urlShortenerSchema = new Schema<ICreateShortUrl>({
     totalClicks: {
         type: Number,
         default: 0
+    },
+    info: {
+        type: Array,
+        default: []
     }
 }, { timestamps: true })
 

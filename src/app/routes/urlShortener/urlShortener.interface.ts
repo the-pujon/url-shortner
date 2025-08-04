@@ -3,5 +3,19 @@ export interface ICreateShortUrl {
     mainUrl: string,
     createdAt?: Date,
     updatedAt?: Date,
-    totalClicks?: number
+    totalClicks?: number,
+    userAgent?: string,
+    ipAddress?: string,
+    referrer?: string,
+    device?: string,
+    browser?: string,
+    os?: string,
+    info?:  {
+        userAgent: string,
+        ipAddress: string,
+        referrer: string,
+        device: string,
+        browser: string,
+        os: string,
+    }[]
 }
