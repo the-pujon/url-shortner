@@ -10,12 +10,13 @@ export interface ICreateShortUrl {
     device?: string,
     browser?: string,
     os?: string,
-    info?:  {
-        userAgent: string,
-        ipAddress: string,
-        referrer: string,
-        device: string,
-        browser: string,
-        os: string,
-    }[]
+    info?: IInfo[]
+}
+
+export interface IInfo {
+    userAgent: string,
+    device: string,
+    browser: string,
+    os: string,
+    timestamp: string
 }

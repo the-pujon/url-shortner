@@ -1,5 +1,5 @@
 import AppError from "../../errors/AppError";
-import { ICreateShortUrl } from "./urlShortener.interface";
+import { ICreateShortUrl, IInfo } from "./urlShortener.interface";
 import shortid from "shortid";
 import UrlShortener from "./urlShortener.model";
 import httpStatus from "http-status";
@@ -7,6 +7,7 @@ import httpStatus from "http-status";
 //create short url
 export const createShortUrl = async (payload: ICreateShortUrl) => {
   try {
+    console.log("payload", payload)
     //generate short id
     const shortId = shortid.generate();
     if (!payload.mainUrl) {
@@ -21,6 +22,7 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
       shortUrl: shortId,
       mainUrl: payload.mainUrl,
       totalClicks: 0,
+      info: payload.info
     });
     return url;
   } catch (error) {
@@ -32,13 +34,14 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
 };
 
 //get short url
-export const getShortUrl = async (shortUrl: string) => {
+export const getShortUrl = async (shortUrl: string, info: IInfo) => {
   try {
     const url = await UrlShortener.findOne({ shortUrl });
     if (!url) {
       throw new AppError(404, "Url not found");
     }
     url.totalClicks!++;
+    url.info!.push(info);
     await url.save();
     return url;
   } catch (error) {

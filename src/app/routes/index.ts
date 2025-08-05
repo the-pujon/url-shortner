@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import urlShortenerRoute from './urlShortener/urlShortener.route';
+import urlShortenerRoute from '../modules/urlShortener/urlShortener.route';
 
 const router = Router();
 

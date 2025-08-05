@@ -1,5 +1,5 @@
-import UrlShortener from "../../../../app/routes/urlShortener/urlShortener.model"
-import { createShortUrl, getShortUrl } from "../../../../app/routes/urlShortener/urlShortener.service"
+import UrlShortener from "../../../../app/modules/urlShortener/urlShortener.model"
+import { createShortUrl, getShortUrl } from "../../../../app/modules/urlShortener/urlShortener.service"
 
 jest.mock("../../../../app/routes/urlShortener/urlShortener.model")
 

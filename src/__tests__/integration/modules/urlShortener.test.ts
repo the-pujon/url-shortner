@@ -1,6 +1,6 @@
 import request from "supertest";
 import mongoose from "mongoose";
-import UrlShortener from "../../../app/routes/urlShortener/urlShortener.model";
+import UrlShortener from "../../../app/modules/urlShortener/urlShortener.model";
 import app from "../../../app";
 import shortid from "shortid";
 
