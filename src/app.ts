@@ -6,7 +6,6 @@ import cors from 'cors';
 import router from './app/routes';
 import globalErrorHandler from './app/middlewares/globalErrorhandler';
 import notFound from './app/middlewares/notFound';
-import cookieParser from "cookie-parser";
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
 
@@ -39,7 +38,6 @@ app.use(cors({
   exposedHeaders: ['set-cookie'],
 }));
 
-app.use(cookieParser());
 
 const limiter = rateLimit({
 	windowMs: 15 * 60 * 1000, // 15 minutes
