@@ -1,0 +1,23 @@
+{
+    "name": "url-shortener",
+    "image": "node:20",
+    "workspaceFolder": "/app",
+    "mounts": [
+      // Bind mount for your local project
+      "source=/E:/url shortner/url-shortner,target=/app,type=bind",
+  
+      // Named volume for logs (similar to: -v ts-docker-logs://app/logs)
+    //   "source=ts-docker-logs,target=/app/logs,type=volume",
+  
+      // Anonymous volume for node_modules (similar to: -v //app/node_modules)
+      "target=/app/node_modules,type=volume"
+    ],
+    "runArgs": [
+      "--name",
+      "url-shortner",
+      "-p",
+      "4000:4000",
+      "--rm" // Automatically remove the container after exiting VS Code
+    ],
+    "postCreateCommand": "npm install"
+  }
