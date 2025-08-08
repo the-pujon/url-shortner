@@ -4,12 +4,6 @@ export interface ICreateShortUrl {
     createdAt?: Date,
     updatedAt?: Date,
     totalClicks?: number,
-    userAgent?: string,
-    ipAddress?: string,
-    referrer?: string,
-    device?: string,
-    browser?: string,
-    os?: string,
     info?: IInfo[]
 }
 
