@@ -1,10 +1,18 @@
 import UrlShortener from "../../../../app/modules/urlShortener/urlShortener.model"
 import { createShortUrl, getShortUrl } from "../../../../app/modules/urlShortener/urlShortener.service"
 
-jest.mock("../../../../app/routes/urlShortener/urlShortener.model")
+jest.mock("../../../../app/modules/urlShortener/urlShortener.model")
 
 const mockUrlShortener = {
     mainUrl: "https://www.google.com"
+}
+
+const mockInfo = {
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    device: "Desktop",
+    browser: "Chrome",
+    os: "Windows",
+    timestamp: new Date().toISOString()
 }
 
 // Clear all mocks before each test
@@ -68,7 +76,7 @@ describe("Shorten URL", ()=>{
             }
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
             mockFindOne.mockResolvedValue(mockUrlShortener)
-            const result = await getShortUrl(mockUrlShortener.shortUrl)
+            const result = await getShortUrl(mockUrlShortener.shortUrl, mockInfo)
             expect(result).toEqual(mockUrlShortener)
             expect(mockFindOne).toHaveBeenCalledWith({shortUrl: mockUrlShortener.shortUrl})
             expect(mockUrlShortener.save).toHaveBeenCalled()
@@ -78,13 +86,13 @@ describe("Shorten URL", ()=>{
         it("should throw error if url not found", async () => {
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
             mockFindOne.mockResolvedValue(null)
-            await expect(getShortUrl("abc123")).rejects.toThrow("Url not found")
+            await expect(getShortUrl("abc123", mockInfo)).rejects.toThrow("Url not found")
         })
 
         it("should throw error if anything goes wrong", async () => {
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
             mockFindOne.mockRejectedValue(new Error("Error finding url"))
-            await expect(getShortUrl("abc123")).rejects.toThrow("Error getting short url")
+            await expect(getShortUrl("abc123", mockInfo)).rejects.toThrow("Error getting short url")
         })
     })
 
