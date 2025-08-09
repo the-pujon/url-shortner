@@ -15,6 +15,7 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
     }
 
     const urlExists = await UrlShortener.findOne({ mainUrl: payload.mainUrl });
+    console.log("urlExists", urlExists)
     if (urlExists) {
       throw new AppError(400, "Url already exists");
     }
@@ -24,6 +25,7 @@ export const createShortUrl = async (payload: ICreateShortUrl) => {
       totalClicks: 0,
       info: payload.info
     });
+    console.log("url", url)
     return url;
   } catch (error) {
     if (error instanceof AppError) {

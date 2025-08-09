@@ -20,7 +20,7 @@ export const createShortUrlController = async (req: Request, res: Response, next
             timestamp: new Date().toISOString()
         }
 
-        const url = await createShortUrl({...req.body, info: infoData})
+        const url = await createShortUrl({...req.body, info: [infoData]})
 
         
         res.status(httpStatus.CREATED).json({

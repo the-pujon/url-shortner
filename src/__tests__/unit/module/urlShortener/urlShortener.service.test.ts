@@ -4,7 +4,7 @@ import { createShortUrl, getShortUrl } from "../../../../app/modules/urlShortene
 jest.mock("../../../../app/modules/urlShortener/urlShortener.model")
 
 const mockUrlShortener = {
-    mainUrl: "https://www.google.com"
+    mainUrl: "https://www.google898.com"
 }
 
 const mockInfo = {
@@ -25,8 +25,23 @@ describe("Shorten URL", ()=>{
         it("should create a short url", async ()=>{
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
             mockFindOne.mockResolvedValue(null)
-            const result = await createShortUrl(mockUrlShortener)
-            expect(result).toBeNull()
+            // Mock create to return a created document
+            const mockCreate = UrlShortener.create as jest.MockedFunction<typeof UrlShortener.create>
+            mockCreate.mockResolvedValue({
+                shortUrl: "abc123",
+                mainUrl: mockUrlShortener.mainUrl,
+                totalClicks: 0,
+                info: [mockInfo]
+            } as any)
+            const result = await createShortUrl({...mockUrlShortener, info: [mockInfo]})
+            console.log(result)
+            // expect(result).toBeDefined()
+            expect(result.mainUrl).toBe(mockUrlShortener.mainUrl)
+            expect(result.shortUrl).toBeDefined()
+            expect(result.totalClicks).toBe(0)
+            expect(result.info).toBeDefined()
+            expect(result.info?.length).toBe(1)
+            expect(result.info?.[0].userAgent).toBe(mockInfo.userAgent)
     
         })
 
@@ -59,8 +74,7 @@ describe("Shorten URL", ()=>{
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
             const mockCreate = UrlShortener.create as jest.MockedFunction<typeof UrlShortener.create>
             mockFindOne.mockRejectedValue(new Error("Error finding url"))
-            const mockError = new Error("Error creating short url")
-            await expect(createShortUrl(mockUrlShortener)).rejects.toThrow(mockError)
+            await expect(createShortUrl(mockUrlShortener)).rejects.toThrow("Error creating short url")
             expect(mockFindOne).toHaveBeenCalledWith({mainUrl: mockUrlShortener.mainUrl})
             expect(mockCreate).not.toHaveBeenCalled()
         })
@@ -72,6 +86,7 @@ describe("Shorten URL", ()=>{
                 shortUrl: "abc123",
                 mainUrl: "https://www.google.com", 
                 totalClicks: 0,
+                info: [mockInfo],
                 save: jest.fn().mockResolvedValue(true)
             }
             const mockFindOne = UrlShortener.findOne as jest.MockedFunction<typeof UrlShortener.findOne>
