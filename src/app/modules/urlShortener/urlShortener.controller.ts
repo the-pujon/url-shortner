@@ -1,5 +1,5 @@
 import { Request, Response, NextFunction } from "express"
-import { createShortUrl, getShortUrl } from "./urlShortener.service"
+import { createShortUrl, getShortUrl, getSingleShortUrlAnalyticsService } from "./urlShortener.service"
 import httpStatus from "http-status"
 import UrlShortener from "./urlShortener.model"
 import { parseUserAgent } from "./urlShortener.utils"
@@ -73,4 +73,17 @@ export const getAllShortURL = async (req: Request, res: Response, next: NextFunc
     }
 }
 
+export const getSingleShortUrlAnalytics = async (req: Request, res: Response, next: NextFunction) => {
+    try{
+        const shortUrl = req.params.shortUrl
+        const url = await getSingleShortUrlAnalyticsService(shortUrl)
+        res.status(httpStatus.OK).json({
+            success: true,
+            message: "Single short url analytics fetched successfully",
+            data: url
+        })
+    }catch(error){
+        next(error);
+    }
+}
 
