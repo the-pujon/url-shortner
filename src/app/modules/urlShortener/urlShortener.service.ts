@@ -53,3 +53,18 @@ export const getShortUrl = async (shortUrl: string, info: IInfo) => {
     throw new AppError(400, "Error getting short url");
   }
 };
+
+export const getSingleShortUrlAnalyticsService = async (shortUrl: string) => {
+  try {
+    const url = await UrlShortener.findOne({ shortUrl });
+    if (!url) {
+      throw new AppError(404, "Url not found");
+    }
+    return url;
+  } catch (error) {
+    if (error instanceof AppError) {
+      throw error;
+    }
+    throw new AppError(400, "Error getting single short url analytics");
+  }
+}
