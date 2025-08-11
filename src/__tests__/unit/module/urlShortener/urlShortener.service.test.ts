@@ -111,6 +111,17 @@ describe("Shorten URL", ()=>{
         })
     })
 
+    describe("get single short url analytics", () => {
+        it("should return the single short url analytics", async () => {
+            const mockUrlShortener = {
+                shortUrl: "abc123",
+                mainUrl: "https://www.google.com",
+                totalClicks: 0,
+                info: [mockInfo]
+            }
+        })
+    })
+
 
 })
 
