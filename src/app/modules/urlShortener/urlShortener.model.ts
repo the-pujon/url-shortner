@@ -1,51 +1,64 @@
 import { model, Schema } from "mongoose";
 import { ICreateShortUrl, IInfo } from "./urlShortener.interface";
 
-const infoSchema = new Schema<IInfo>({
+const infoSchema = new Schema<IInfo>(
+  {
     userAgent: {
-        type: String,
-        required: true
+      type: String,
+      required: true,
     },
     device: {
-        type: String,
-        required: true
+      type: String,
+      required: true,
     },
     browser: {
-        type: String,
-        required: true
+      type: String,
+      required: true,
     },
     os: {
-        type: String,
-        required: true
+      type: String,
+      required: true,
     },
     timestamp: {
-        type: String,
-        required: true,
-        default: new Date().toISOString()
-    }
-})
+      type: String,
+      required: true,
+      default: new Date().toISOString(),
+    },
+    referer: {
+      type: String,
+      default: "Unknown",
+    },
+    ipAddress: {
+      type: String,
+      default: "Unknown",
+    },
+  }
+);
 
-const urlShortenerSchema = new Schema<ICreateShortUrl>({
+const urlShortenerSchema = new Schema<ICreateShortUrl>(
+  {
     shortUrl: {
-        type: String,
-        required: true,
-        unique: true
+      type: String,
+      required: true,
+      unique: true,
     },
     mainUrl: {
-        type: String,
-        required: true,
-        unique: true
+      type: String,
+      required: true,
+      unique: true,
     },
     totalClicks: {
-        type: Number,
-        default: 0
+      type: Number,
+      default: 0,
     },
     info: {
-        type: [infoSchema],
-        required: true
-    }
-}, { timestamps: true })
+      type: [infoSchema],
+      required: true,
+    },
+  },
+  { timestamps: true }
+);
 
-const UrlShortener = model<ICreateShortUrl>("UrlShortener", urlShortenerSchema)
+const UrlShortener = model<ICreateShortUrl>("UrlShortener", urlShortenerSchema);
 
-export default UrlShortener
+export default UrlShortener;

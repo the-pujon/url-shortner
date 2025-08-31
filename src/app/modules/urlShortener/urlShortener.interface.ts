@@ -19,4 +19,6 @@ export interface IInfo {
     browser: string,
     os: string,
     timestamp: string
+    referer?: string,
+    ipAddress?: string
 }
