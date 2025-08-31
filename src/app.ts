@@ -8,8 +8,11 @@ import globalErrorHandler from './app/middlewares/globalErrorhandler';
 import notFound from './app/middlewares/notFound';
 import bodyParser from 'body-parser';
 import rateLimit from 'express-rate-limit';
+import client from "prom-client";
 
 const app: Application = express();
+const collectDefaultMetrics = client.collectDefaultMetrics;
+collectDefaultMetrics({ register:client.register });
 
 app.use(express.json());
 app.use(bodyParser.json());
@@ -56,6 +59,12 @@ app.use('/api/v1', router);
 app.get('/', (req: Request, res: Response) => {
   res.send('Hi Express Server v2!! you are live now!!!!');
 });
+
+app.get('/metrics', async (req: Request, res: Response) => {
+  res.set('Content-Type', client.register.contentType);
+  const metrics = await client.register.metrics();
+  res.send(metrics);
+})
 
 app.use(globalErrorHandler);
 
