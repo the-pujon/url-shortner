@@ -1,8 +1,8 @@
-import { Request, Response, NextFunction } from "express";
-import { createShortUrl, getShortUrl } from "./urlShortener.service";
-import httpStatus from "http-status";
-import UrlShortener from "./urlShortener.model";
-import { parseUserAgent } from "./urlShortener.utils";
+import { Request, Response, NextFunction } from "express"
+import { createShortUrl, getShortUrl, getSingleShortUrlAnalyticsService } from "./urlShortener.service"
+import httpStatus from "http-status"
+import UrlShortener from "./urlShortener.model"
+import { parseUserAgent } from "./urlShortener.utils"
 
 export const createShortUrlController = async (
   req: Request,
@@ -23,18 +23,19 @@ export const createShortUrlController = async (
       timestamp: new Date().toISOString(),
     };
 
-    const url = await createShortUrl({ ...req.body, info: infoData });
+        const url = await createShortUrl({...req.body, info: infoData})
 
-    res.status(httpStatus.CREATED).json({
-      success: true,
-      message: "Short url created successfully",
-      data: url,
-    });
-  } catch (error) {
-    // Pass the error to the next middleware (global error handler)
-    next(error);
-  }
-};
+        
+        res.status(httpStatus.CREATED).json({
+            success: true,
+            message: "Short url created successfully",
+            data: url
+        })
+    }catch(error){
+        // Pass the error to the next middleware (global error handler)
+        next(error);
+    }
+}
 
 export const getShortUrlController = async (
   req: Request,
@@ -69,20 +70,31 @@ export const getShortUrlController = async (
   }
 };
 
-export const getAllShortURL = async (
-  req: Request,
-  res: Response,
-  next: NextFunction
-) => {
-  try {
-    const urls = await UrlShortener.find();
+export const getAllShortURL = async (req: Request, res: Response, next: NextFunction) => {
+    try{
+        const urls = await UrlShortener.find()
+        
+        res.status(httpStatus.OK).json({
+            success: true,
+            message: "All short urls fetched successfully",
+            data: urls
+        })
+    }catch(error){
+        next(error);
+    }
+}
 
-    res.status(httpStatus.OK).json({
-      success: true,
-      message: "All short urls fetched successfully",
-      data: urls,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+export const getSingleShortUrlAnalytics = async (req: Request, res: Response, next: NextFunction) => {
+    try{
+        const shortUrl = req.params.shortUrl
+        const url = await getSingleShortUrlAnalyticsService(shortUrl)
+        res.status(httpStatus.OK).json({
+            success: true,
+            message: "Single short url analytics fetched successfully",
+            data: url
+        })
+    }catch(error){
+        next(error);
+    }
+}
+

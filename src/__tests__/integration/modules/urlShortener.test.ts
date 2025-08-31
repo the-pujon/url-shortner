@@ -4,6 +4,26 @@ import UrlShortener from "../../../app/modules/urlShortener/urlShortener.model";
 import app from "../../../app";
 import shortid from "shortid";
 
+
+const mockInfo = {
+  userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+  device: "Desktop",
+  browser: "Chrome",
+  os: "Windows",
+  timestamp: new Date().toISOString()
+}
+
+const mockResponseData = {
+  success: true,
+  message: "Short url created successfully",
+  data: {
+    shortUrl: "https://short.url/123456",
+    mainUrl: "https://www.google.com",
+    totalClicks: 0,
+    info: [mockInfo]
+  }
+}
+
 describe("URL Shortener Integration Test", () => {
   // test db setup
   // connect to db
@@ -21,6 +41,8 @@ describe("URL Shortener Integration Test", () => {
     const result = await UrlShortener.deleteMany({});
   });
 
+
+
   describe("POST create short url", () => {
     it("should create short url successfully", async () => {
       const testData = {
@@ -29,14 +51,29 @@ describe("URL Shortener Integration Test", () => {
 
       const response = await request(app)
         .post("/api/v1/url-shortener/create-short-url")
+        .set("User-Agent", mockInfo.userAgent)
         .send(testData)
         .expect(201);
 
-      expect(response.body).toEqual({
+      // Expect dynamic response shape and values rather than exact deep equality
+      expect(response.body).toEqual(expect.objectContaining({
         success: true,
         message: "Short url created successfully",
-        data: [],
-      });
+        data: expect.objectContaining({
+          shortUrl: expect.any(String),
+          mainUrl: testData.mainUrl,
+          totalClicks: 0,
+          info: expect.arrayContaining([
+            expect.objectContaining({
+              userAgent: mockInfo.userAgent,
+              device: mockInfo.device,
+              browser: mockInfo.browser,
+              os: mockInfo.os,
+              timestamp: expect.any(String)
+            })
+          ])
+        })
+      }));
 
       const createdUrl = await UrlShortener.findOne({
         mainUrl: testData.mainUrl,
