@@ -33,7 +33,16 @@ services:
     volumes:
       - ./prometheus-config.yml:/etc/prometheus/prometheus.yml
 
+  grafana:
+    image: grafana/grafana-oss
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana-storage:/var/lib/grafana
+
 volumes:
   # url-shortener-db:
   # url-shortener-server:
   prom-server:
+  grafana-storage:
